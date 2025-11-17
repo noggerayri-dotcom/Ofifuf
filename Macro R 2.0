@@ -1,0 +1,30 @@
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+
+local function isMovementInput(input)
+    -- Check if input is in movement area (typically left side of screen)
+    if input.Position.X < 500 then -- Adjust this threshold as needed
+        return true
+    end
+    return false
+end
+
+local function simulateAutoTap()
+    local mockTouch = {
+        Position = Vector2.new(741, 153),
+        DevicePosition = Vector2.new(741, 153),
+        TouchId = 999, -- Use high ID to avoid conflicts
+        UserInputType = Enum.UserInputType.Touch
+    }
+    
+    -- Fire touch events
+    UserInputService.TouchStarted:Fire(mockTouch)
+    task.wait(0.01)
+    UserInputService.TouchEnded:Fire(mockTouch)
+end
+
+-- Auto tap at 10 times per second
+while true do
+    simulateAutoTap()
+    task.wait(0.1) -- 10 times per second
+end
