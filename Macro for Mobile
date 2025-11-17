@@ -1,53 +1,399 @@
--- Client-only visual assist system (legal version)
+-- Mobile Combat Script - Jump Activated Auto-Combat
+-- Only activates when jumping, stops when hitting players
 
 local Players = game:GetService("Players")
-local LocalPlayer = Players.LocalPlayer
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
 
-local function applyCircle(character)
-    if character == nil then return end
-    if character:FindFirstChild("HumanoidRootPart") == nil then return end
+local player = Players.LocalPlayer
+local character = player.Character or player.CharacterAdded:Wait()
+local humanoid = character:WaitForChild("Humanoid")
 
-    local hrp = character.HumanoidRootPart
+-- GUI Setup
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "JumpCombatGUI"
+screenGui.ResetOnSpawn = false
+screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+screenGui.DisplayOrder = 999
 
-    -- Remove existing circles
-    local old = hrp:FindFirstChild("VisibilityCircle")
-    if old then old:Destroy() end
+local mainFrame = Instance.new("Frame")
+mainFrame.Size = UDim2.new(0, 250, 0, 200)
+mainFrame.Position = UDim2.new(0, 50, 0, 50)
+mainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 30)
+mainFrame.BorderSizePixel = 0
+mainFrame.Active = true
+mainFrame.Draggable = true
 
-    -- Create red neon circle
-    local circle = Instance.new("BillboardGui")
-    circle.Name = "VisibilityCircle"
-    circle.Size = UDim2.new(5,0,5,0)  -- size of circle
-    circle.AlwaysOnTop = true
+local corner = Instance.new("UICorner")
+corner.CornerRadius = UDim.new(0, 8)
+corner.Parent = mainFrame
 
-    local frame = Instance.new("Frame")
-    frame.Size = UDim2.new(1,0,1,0)
-    frame.BackgroundColor3 = Color3.fromRGB(150,0,0) -- deep red
-    frame.BorderSizePixel = 0
-    frame.BackgroundTransparency = 0
-    frame.Parent = circle
+local stroke = Instance.new("UIStroke")
+stroke.Color = Color3.fromRGB(80, 80, 120)
+stroke.Thickness = 2
+stroke.Parent = mainFrame
 
-    -- Make it a circle
-    local uiCorner = Instance.new("UICorner")
-    uiCorner.CornerRadius = UDim.new(1,0)
-    uiCorner.Parent = frame
+local titleLabel = Instance.new("TextLabel")
+titleLabel.Size = UDim2.new(1, 0, 0, 25)
+titleLabel.Position = UDim2.new(0, 0, 0, 10)
+titleLabel.BackgroundTransparency = 1
+titleLabel.Text = "🦘 Jump Combat"
+titleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+titleLabel.Font = Enum.Font.GothamBold
+titleLabel.TextSize = 16
 
-    circle.Parent = hrp
+local statusLabel = Instance.new("TextLabel")
+statusLabel.Size = UDim2.new(1, 0, 0, 20)
+statusLabel.Position = UDim2.new(0, 0, 0, 40)
+statusLabel.BackgroundTransparency = 1
+statusLabel.Text = "🔴 Status: OFF"
+statusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
+statusLabel.Font = Enum.Font.Gotham
+statusLabel.TextSize = 12
+
+local toggleButton = Instance.new("TextButton")
+toggleButton.Size = UDim2.new(0, 100, 0, 35)
+toggleButton.Position = UDim2.new(0, 15, 0, 70)
+toggleButton.BackgroundColor3 = Color3.fromRGB(220, 60, 60)
+toggleButton.BorderSizePixel = 0
+toggleButton.Text = "🟢 ENABLE"
+toggleButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+toggleButton.Font = Enum.Font.GothamBold
+toggleButton.TextSize = 14
+
+local corner2 = Instance.new("UICorner")
+corner2.CornerRadius = UDim.new(0, 6)
+corner2.Parent = toggleButton
+
+local statsLabel = Instance.new("TextLabel")
+statsLabel.Size = UDim2.new(1, -20, 0, 70)
+statsLabel.Position = UDim2.new(0, 10, 0, 115)
+statsLabel.BackgroundTransparency = 1
+statsLabel.Text = "🎯 Jump to activate\n⚡ Auto-taps closest player\n🎹 Spams R ability\n🛑 Stops when hitting target"
+statsLabel.TextColor3 = Color3.fromRGB(180, 180, 220)
+statsLabel.Font = Enum.Font.Gotham
+statsLabel.TextSize = 11
+statsLabel.TextXAlignment = Enum.TextXAlignment.Left
+statsLabel.TextYAlignment = Enum.TextYAlignment.Top
+
+-- Assemble GUI
+mainFrame.Parent = screenGui
+titleLabel.Parent = mainFrame
+statusLabel.Parent = mainFrame
+toggleButton.Parent = mainFrame
+statsLabel.Parent = mainFrame
+screenGui.Parent = player:WaitForChild("PlayerGui")
+
+-- Script Variables
+local scriptEnabled = false
+local isJumping = false
+local combatActive = false
+local combatConnection
+local rSpamConnection
+local tapInterval = 0.031
+local rInterval = 0.031
+local lastTapTime = 0
+local lastRTime = 0
+local lastTarget = nil
+local hitDetectionEnabled = false
+
+-- Function to find closest player
+local function findClosestPlayer()
+    local closestPlayer = nil
+    local closestDistance = math.huge
+    local closestRoot = nil
+    local localRoot = character:FindFirstChild("HumanoidRootPart")
+    
+    if not localRoot then return nil, nil, math.huge end
+    
+    local localPosition = localRoot.Position
+    
+    for _, otherPlayer in pairs(Players:GetPlayers()) do
+        if otherPlayer ~= player and otherPlayer.Character then
+            local otherHumanoid = otherPlayer.Character:FindFirstChild("Humanoid")
+            local otherRoot = otherPlayer.Character:FindFirstChild("HumanoidRootPart")
+            
+            if otherHumanoid and otherHumanoid.Health > 0 and otherRoot then
+                local distance = (otherRoot.Position - localPosition).Magnitude
+                if distance < closestDistance and distance < 50 then -- Reduced range for accuracy
+                    closestDistance = distance
+                    closestPlayer = otherPlayer
+                    closestRoot = otherRoot
+                end
+            end
+        end
+    end
+    
+    return closestPlayer, closestRoot, closestDistance
 end
 
-local function setupPlayer(plr)
-    if plr == LocalPlayer then return end -- don't modify yourself
+-- Function to check if we hit the target
+local function checkIfHitTarget(targetRoot)
+    if not targetRoot or not targetRoot.Parent then return false end
+    
+    local targetHumanoid = targetRoot.Parent:FindFirstChild("Humanoid")
+    if not targetHumanoid then return false end
+    
+    -- Check if target health decreased (we hit them)
+    if targetHumanoid.Health < targetHumanoid.MaxHealth then
+        return true
+    end
+    
+    -- Check distance for melee hit
+    local localRoot = character:FindFirstChild("HumanoidRootPart")
+    if localRoot then
+        local distance = (targetRoot.Position - localRoot.Position).Magnitude
+        if distance < 10 then -- Melee range
+            return true
+        end
+    end
+    
+    return false
+end
 
-    plr.CharacterAdded:Connect(function(char)
-        applyCircle(char)
+-- Function to simulate mobile screen tap on player
+local function simulateMobileTap(targetRoot)
+    if not targetRoot then return false end
+    
+    local hitDetected = false
+    
+    -- Method 1: Simulate touch event on target
+    pcall(function()
+        -- Get screen position of target
+        local camera = workspace.CurrentCamera
+        local screenPoint, onScreen = camera:WorldToScreenPoint(targetRoot.Position)
+        
+        if onScreen then
+            -- Fire remote events for combat
+            local args = {
+                [1] = targetRoot.Position,
+                [2] = targetRoot,
+                [3] = "MouseClick",
+                [4] = player
+            }
+            
+            -- Try common remote event names
+            local remotes = game:GetService("ReplicatedStorage"):FindFirstChild("RemoteEvents")
+            if remotes then
+                local combatEvents = {
+                    "CombatEvent", "DamageEvent", "ClickEvent", 
+                    "AttackEvent", "HitEvent", "TouchEvent"
+                }
+                
+                for _, eventName in pairs(combatEvents) do
+                    local event = remotes:FindFirstChild(eventName)
+                    if event then
+                        event:FireServer(unpack(args))
+                        hitDetected = true
+                    end
+                end
+            end
+            
+            -- Direct humanoid damage (immediate hit detection)
+            local targetHumanoid = targetRoot.Parent:FindFirstChild("Humanoid")
+            if targetHumanoid and targetHumanoid.Health > 0 then
+                local previousHealth = targetHumanoid.Health
+                targetHumanoid:TakeDamage(20)
+                if targetHumanoid.Health < previousHealth then
+                    hitDetected = true
+                end
+            end
+            
+            -- Try to find click detectors or proximity prompts
+            for _, part in pairs(targetRoot.Parent:GetDescendants()) do
+                if part:IsA("ClickDetector") then
+                    part:FireServer()
+                    hitDetected = true
+                elseif part:IsA("ProximityPrompt") then
+                    part:InputHoldBegin()
+                    task.wait(0.01)
+                    part:InputHoldEnd()
+                    hitDetected = true
+                end
+            end
+        end
     end)
+    
+    return hitDetected
+end
 
-    if plr.Character then
-        applyCircle(plr.Character)
+-- Function to spam R ability
+local function spamRAbility()
+    pcall(function()
+        -- Virtual key press
+        virtualInput = game:GetService("VirtualInputManager")
+        virtualInput:SendKeyEvent(true, Enum.KeyCode.R, false, game)
+        task.wait(0.01)
+        virtualInput:SendKeyEvent(false, Enum.KeyCode.R, false, game)
+        
+        -- Remote events for abilities
+        local args = {
+            [1] = "R",
+            [2] = Enum.KeyCode.R,
+            [3] = character:GetPivot().Position
+        }
+        
+        local remotes = game:GetService("ReplicatedStorage"):FindFirstChild("RemoteEvents")
+        if remotes then
+            local abilityEvents = {
+                "AbilityEvent", "UseAbility", "SkillEvent", 
+                "KeyEvent", "InputEvent", "ActionEvent"
+            }
+            
+            for _, eventName in pairs(abilityEvents) do
+                local event = remotes:FindFirstChild(eventName)
+                if event then
+                    event:FireServer(unpack(args))
+                end
+            end
+        end
+    end)
+end
+
+-- Main combat loop
+local function startCombat()
+    if combatConnection then combatConnection:Disconnect() end
+    if rSpamConnection then rSpamConnection:Disconnect() end
+    
+    hitDetectionEnabled = true
+    lastTarget = nil
+    
+    -- ULTRA FAST Tap spam loop
+    combatConnection = RunService.Heartbeat:Connect(function()
+        if not hitDetectionEnabled then return end
+        
+        local currentTime = tick()
+        if currentTime - lastTapTime >= tapInterval then
+            local closestPlayer, closestRoot, distance = findClosestPlayer()
+            if closestRoot then
+                lastTarget = closestRoot
+                local hitDetected = simulateMobileTap(closestRoot)
+                
+                -- Stop combat if we hit the target
+                if hitDetected or checkIfHitTarget(closestRoot) then
+                    stopCombat()
+                    statusLabel.Text = "🎯 Status: TARGET HIT"
+                    statusLabel.TextColor3 = Color3.fromRGB(255, 215, 0)
+                    return
+                end
+            end
+            lastTapTime = currentTime
+        end
+    end)
+    
+    -- ULTRA FAST R spam loop
+    rSpamConnection = RunService.Heartbeat:Connect(function()
+        if not hitDetectionEnabled then return end
+        
+        local currentTime = tick()
+        if currentTime - lastRTime >= rInterval then
+            spamRAbility()
+            lastRTime = currentTime
+        end
+    end)
+end
+
+-- Stop combat
+local function stopCombat()
+    hitDetectionEnabled = false
+    combatActive = false
+    isJumping = false
+    
+    if combatConnection then
+        combatConnection:Disconnect()
+        combatConnection = nil
+    end
+    if rSpamConnection then
+        rSpamConnection:Disconnect()
+        rSpamConnection = nil
+    end
+    
+    statusLabel.Text = "🟡 Status: READY"
+    statusLabel.TextColor3 = Color3.fromRGB(255, 255, 100)
+    mainFrame.BackgroundColor3 = Color3.fromRGB(35, 35, 20)
+end
+
+-- Jump detection function
+local function onJumpStateChanged()
+    if not scriptEnabled then return end
+    
+    if humanoid.Jump and not combatActive then
+        -- Jump started - activate combat
+        isJumping = true
+        combatActive = true
+        statusLabel.Text = "🟢 Status: JUMPING"
+        statusLabel.TextColor3 = Color3.fromRGB(80, 255, 80)
+        mainFrame.BackgroundColor3 = Color3.fromRGB(30, 40, 30)
+        
+        startCombat()
+        
+    elseif not humanoid.Jump and combatActive then
+        -- Jump ended but we keep combat active until we hit target
+        isJumping = false
+        statusLabel.Text = "🟡 Status: AIMING"
+        statusLabel.TextColor3 = Color3.fromRGB(255, 255, 100)
     end
 end
 
-for _, plr in pairs(Players:GetPlayers()) do
-    setupPlayer(plr)
+-- Toggle script
+toggleButton.MouseButton1Click:Connect(function()
+    scriptEnabled = not scriptEnabled
+    
+    if scriptEnabled then
+        -- Enable script
+        toggleButton.Text = "🔴 DISABLE"
+        toggleButton.BackgroundColor3 = Color3.fromRGB(60, 180, 60)
+        statusLabel.Text = "🟡 Status: READY"
+        statusLabel.TextColor3 = Color3.fromRGB(255, 255, 100)
+        mainFrame.BackgroundColor3 = Color3.fromRGB(35, 35, 20)
+        
+        -- Connect to jump event
+        humanoid:GetPropertyChangedSignal("Jump"):Connect(onJumpStateChanged)
+        
+    else
+        -- Disable script
+        toggleButton.Text = "🟢 ENABLE"
+        toggleButton.BackgroundColor3 = Color3.fromRGB(220, 60, 60)
+        statusLabel.Text = "🔴 Status: OFF"
+        statusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
+        mainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 30)
+        
+        stopCombat()
+    end
+end)
+
+-- Character respawn handling
+player.CharacterAdded:Connect(function(newCharacter)
+    character = newCharacter
+    humanoid = character:WaitForChild("Humanoid")
+    
+    if scriptEnabled then
+        task.wait(2)
+        -- Reconnect jump event
+        humanoid:GetPropertyChangedSignal("Jump"):Connect(onJumpStateChanged)
+        statusLabel.Text = "🟡 Status: READY"
+    end
+end)
+
+-- Mobile jump button detection
+UserInputService.JumpRequest:Connect(function()
+    if scriptEnabled and not combatActive then
+        onJumpStateChanged()
+    end
+end)
+
+-- Auto-start if character exists
+if character and humanoid then
+    print("🦘 Jump Combat Script Loaded!")
+    print("🎯 Jump to activate auto-combat")
+    print("🛑 Stops when hitting target")
 end
 
-Players.PlayerAdded:Connect(setupPlayer)
+-- Cleanup
+game:GetService("ScriptContext").DescendantRemoving:Connect(function(descendant)
+    if descendant == script then
+        stopCombat()
+        screenGui:Destroy()
+    end
+end)
