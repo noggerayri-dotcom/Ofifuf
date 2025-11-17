@@ -1,6 +1,5 @@
--- FULL EXTREME MODE + PERMANENT GRAY SKY + LOWEST EFFECT QUALITY
--- Works in Blox Fruits & all games
--- Safe client-side visual override only
+-- EXTREME VISUAL OVERRIDE + HARD GRAY SKY + QUALITY LV2
+-- Safe client-only LocalScript for Blox Fruits or any Roblox game
 
 local RunService = game:GetService("RunService")
 local Lighting = game:GetService("Lighting")
@@ -9,27 +8,31 @@ local Terrain = Workspace:FindFirstChildOfClass("Terrain")
 
 local GRAY = Color3.fromRGB(128,128,128)
 local AMBIENT_GRAY = Color3.fromRGB(140,140,140)
+local SKY_NAME = "_ForcedGraySky"
 
 local lastHeavy = 0
-local HEAVY_LOOP_INTERVAL = 1.3  -- aggressive for BF effects
+local HEAVY_LOOP_INTERVAL = 1.5  -- seconds
 
 -------------------------------------------------------
--- 1) PERMANENT GRAY SKY
+-- 1) HARD GRAY SKY ENFORCEMENT
 -------------------------------------------------------
 local function enforceGraySky()
-    for _, obj in ipairs(Lighting:GetChildren()) do
-        if obj:IsA("Sky") and obj.Name ~= "_ForcedGraySky" then
-            obj:Destroy()
+    -- Remove any other sky objects
+    for _, child in ipairs(Lighting:GetChildren()) do
+        if child:IsA("Sky") and child.Name ~= SKY_NAME then
+            child:Destroy()
         end
     end
 
-    local sky = Lighting:FindFirstChild("_ForcedGraySky")
+    -- Create or reuse forced gray sky
+    local sky = Lighting:FindFirstChild(SKY_NAME)
     if not sky then
         sky = Instance.new("Sky")
-        sky.Name = "_ForcedGraySky"
+        sky.Name = SKY_NAME
         sky.Parent = Lighting
     end
 
+    -- Remove all textures (no sun, moon, stars, clouds)
     sky.SkyboxBk = ""
     sky.SkyboxDn = ""
     sky.SkyboxFt = ""
@@ -46,7 +49,7 @@ Lighting.ChildAdded:Connect(function()
 end)
 
 -------------------------------------------------------
--- 2) REMOVE FOG / ATMOSPHERE / SHADOWS
+-- 2) LIGHTING SIMPLIFICATION
 -------------------------------------------------------
 local function enforceLighting()
     Lighting.FogStart = 1e9
@@ -72,11 +75,11 @@ local function enforceLighting()
 end
 
 -------------------------------------------------------
--- 3) TERRAIN REDUCTION
+-- 3) TERRAIN SIMPLIFICATION
 -------------------------------------------------------
 local function enforceTerrain()
     if Terrain then
-        Terrain.Decoration = false
+        pcall(function() Terrain.Decoration = false end)
         Terrain.WaterWaveSize = 0
         Terrain.WaterWaveSpeed = 0
         Terrain.WaterTransparency = 1
@@ -85,53 +88,40 @@ local function enforceTerrain()
 end
 
 -------------------------------------------------------
--- 4) EFFECT QUALITY REDUCER (Particles/Beams/Trails)
+-- 4) EFFECT QUALITY REDUCTION
 -------------------------------------------------------
 local function simplifyEffect(obj)
-    -- PARTICLES
     if obj:IsA("ParticleEmitter") then
         obj.Rate = 0
         obj.Speed = NumberRange.new(0)
         obj.Lifetime = NumberRange.new(0)
-        obj.LightEmission = 0
-        obj.LightInfluence = 0
         obj.Size = NumberSequence.new(0)
-        obj.Transparency = NumberSequence.new(1)
-    end
-
-    -- BEAMS
-    if obj:IsA("Beam") then
         obj.LightEmission = 0
         obj.LightInfluence = 0
+        obj.Transparency = NumberSequence.new(1)
+    elseif obj:IsA("Beam") then
+        obj.Enabled = false
         obj.Width0 = 0
         obj.Width1 = 0
-        obj.Enabled = false
-    end
-
-    -- TRAILS
-    if obj:IsA("Trail") then
+        obj.LightEmission = 0
+        obj.LightInfluence = 0
+    elseif obj:IsA("Trail") then
         obj.Enabled = false
         obj.Lifetime = 0
-        obj.LightEmission = 0
-        obj.WidthScale = NumberSequence.new(0)
         obj.Transparency = NumberSequence.new(1)
-    end
-
-    -- EXPLOSIONS
-    if obj:IsA("Explosion") then
+        obj.WidthScale = NumberSequence.new(0)
+        obj.LightEmission = 0
+    elseif obj:IsA("Explosion") then
         obj.BlastPressure = 0
         obj.BlastRadius = 0
         obj.Visible = false
-    end
-
-    -- SMOKE / FIRE / SPARKLES
-    if obj:IsA("Smoke") or obj:IsA("Fire") or obj:IsA("Sparkles") then
+    elseif obj:IsA("Smoke") or obj:IsA("Fire") or obj:IsA("Sparkles") then
         obj.Enabled = false
     end
 end
 
 -------------------------------------------------------
--- 5) HEAVY PASS — MESH/DECAL/TEXTURE REDUCTION
+-- 5) HEAVY WORLD SIMPLIFICATION
 -------------------------------------------------------
 local function heavySimplify()
     for _, obj in ipairs(Workspace:GetDescendants()) do
@@ -160,16 +150,9 @@ end
 Workspace.DescendantAdded:Connect(function(obj)
     task.defer(function()
         simplifyEffect(obj)
-
-        if obj:IsA("Decal") or obj:IsA("Texture") then
-            obj.Transparency = 1
-        end
-        if obj:IsA("MeshPart") then
-            obj.TextureID = ""
-        end
-        if obj:IsA("SpecialMesh") then
-            obj.TextureId = ""
-        end
+        if obj:IsA("Decal") or obj:IsA("Texture") then obj.Transparency = 1 end
+        if obj:IsA("MeshPart") then obj.TextureID = "" end
+        if obj:IsA("SpecialMesh") then obj.TextureId = "" end
         if obj:IsA("Part") or obj:IsA("MeshPart") or obj:IsA("UnionOperation") then
             obj.Material = Enum.Material.SmoothPlastic
             obj.Reflectance = 0
@@ -178,11 +161,11 @@ Workspace.DescendantAdded:Connect(function(obj)
 end)
 
 -------------------------------------------------------
--- 6) FORCE LOW RENDERING QUALITY
+-- 6) FORCE RENDER QUALITY LEVEL 2
 -------------------------------------------------------
 local function forceLowQuality()
     pcall(function()
-        settings().Rendering.QualityLevel = Enum.SavedQualityLevel.Level01
+        settings().Rendering.QualityLevel = Enum.SavedQualityLevel.Level02
     end)
 end
 
@@ -202,221 +185,11 @@ RunService.RenderStepped:Connect(function(dt)
     end
 end)
 
+-- Initial enforcement
 heavySimplify()
 enforceTerrain()
 enforceLighting()
 enforceGraySky()
 forceLowQuality()
 
-print("[EXTREME VISUAL MODE + GRAY SKY + EFFECT QUALITY LV1] ACTIVE")
--- FULL EXTREME MODE + PERMANENT GRAY SKY + LOWEST EFFECT QUALITY
--- Works in Blox Fruits & all games
--- Safe client-side visual override only
-
-local RunService = game:GetService("RunService")
-local Lighting = game:GetService("Lighting")
-local Workspace = game:GetService("Workspace")
-local Terrain = Workspace:FindFirstChildOfClass("Terrain")
-
-local GRAY = Color3.fromRGB(128,128,128)
-local AMBIENT_GRAY = Color3.fromRGB(140,140,140)
-
-local lastHeavy = 0
-local HEAVY_LOOP_INTERVAL = 1.3  -- aggressive for BF effects
-
--------------------------------------------------------
--- 1) PERMANENT GRAY SKY
--------------------------------------------------------
-local function enforceGraySky()
-    for _, obj in ipairs(Lighting:GetChildren()) do
-        if obj:IsA("Sky") and obj.Name ~= "_ForcedGraySky" then
-            obj:Destroy()
-        end
-    end
-
-    local sky = Lighting:FindFirstChild("_ForcedGraySky")
-    if not sky then
-        sky = Instance.new("Sky")
-        sky.Name = "_ForcedGraySky"
-        sky.Parent = Lighting
-    end
-
-    sky.SkyboxBk = ""
-    sky.SkyboxDn = ""
-    sky.SkyboxFt = ""
-    sky.SkyboxLf = ""
-    sky.SkyboxRt = ""
-    sky.SkyboxUp = ""
-    sky.SkyboxTintColor = GRAY
-    sky.CelestialBodiesShown = false
-    sky.StarCount = 0
-end
-
-Lighting.ChildAdded:Connect(function()
-    task.defer(enforceGraySky)
-end)
-
--------------------------------------------------------
--- 2) REMOVE FOG / ATMOSPHERE / SHADOWS
--------------------------------------------------------
-local function enforceLighting()
-    Lighting.FogStart = 1e9
-    Lighting.FogEnd = 1e9
-    Lighting.FogColor = GRAY
-
-    for _, obj in ipairs(Lighting:GetChildren()) do
-        if obj:IsA("Atmosphere") or obj:IsA("PostEffect") then
-            obj:Destroy()
-        end
-    end
-
-    Lighting.Brightness = 1
-    Lighting.Ambient = AMBIENT_GRAY
-    Lighting.OutdoorAmbient = AMBIENT_GRAY
-    Lighting.EnvironmentDiffuseScale = 0
-    Lighting.EnvironmentSpecularScale = 0
-
-    Lighting.ColorShift_Top = GRAY
-    Lighting.ColorShift_Bottom = GRAY
-    Lighting.GlobalShadows = false
-    Lighting.ShadowSoftness = 0
-end
-
--------------------------------------------------------
--- 3) TERRAIN REDUCTION
--------------------------------------------------------
-local function enforceTerrain()
-    if Terrain then
-        Terrain.Decoration = false
-        Terrain.WaterWaveSize = 0
-        Terrain.WaterWaveSpeed = 0
-        Terrain.WaterTransparency = 1
-        Terrain.WaterReflectance = 0
-    end
-end
-
--------------------------------------------------------
--- 4) EFFECT QUALITY REDUCER (Particles/Beams/Trails)
--------------------------------------------------------
-local function simplifyEffect(obj)
-    -- PARTICLES
-    if obj:IsA("ParticleEmitter") then
-        obj.Rate = 0
-        obj.Speed = NumberRange.new(0)
-        obj.Lifetime = NumberRange.new(0)
-        obj.LightEmission = 0
-        obj.LightInfluence = 0
-        obj.Size = NumberSequence.new(0)
-        obj.Transparency = NumberSequence.new(1)
-    end
-
-    -- BEAMS
-    if obj:IsA("Beam") then
-        obj.LightEmission = 0
-        obj.LightInfluence = 0
-        obj.Width0 = 0
-        obj.Width1 = 0
-        obj.Enabled = false
-    end
-
-    -- TRAILS
-    if obj:IsA("Trail") then
-        obj.Enabled = false
-        obj.Lifetime = 0
-        obj.LightEmission = 0
-        obj.WidthScale = NumberSequence.new(0)
-        obj.Transparency = NumberSequence.new(1)
-    end
-
-    -- EXPLOSIONS
-    if obj:IsA("Explosion") then
-        obj.BlastPressure = 0
-        obj.BlastRadius = 0
-        obj.Visible = false
-    end
-
-    -- SMOKE / FIRE / SPARKLES
-    if obj:IsA("Smoke") or obj:IsA("Fire") or obj:IsA("Sparkles") then
-        obj.Enabled = false
-    end
-end
-
--------------------------------------------------------
--- 5) HEAVY PASS — MESH/DECAL/TEXTURE REDUCTION
--------------------------------------------------------
-local function heavySimplify()
-    for _, obj in ipairs(Workspace:GetDescendants()) do
-        simplifyEffect(obj)
-
-        if obj:IsA("MeshPart") then
-            obj.TextureID = ""
-        elseif obj:IsA("SpecialMesh") then
-            obj.TextureId = ""
-        end
-
-        if obj:IsA("Decal") or obj:IsA("Texture") then
-            obj.Transparency = 1
-        end
-
-        if obj:IsA("Part") or obj:IsA("MeshPart") or obj:IsA("UnionOperation") then
-            obj.Material = Enum.Material.SmoothPlastic
-            obj.Reflectance = 0
-
-            local sa = obj:FindFirstChildOfClass("SurfaceAppearance")
-            if sa then sa:Destroy() end
-        end
-    end
-end
-
-Workspace.DescendantAdded:Connect(function(obj)
-    task.defer(function()
-        simplifyEffect(obj)
-
-        if obj:IsA("Decal") or obj:IsA("Texture") then
-            obj.Transparency = 1
-        end
-        if obj:IsA("MeshPart") then
-            obj.TextureID = ""
-        end
-        if obj:IsA("SpecialMesh") then
-            obj.TextureId = ""
-        end
-        if obj:IsA("Part") or obj:IsA("MeshPart") or obj:IsA("UnionOperation") then
-            obj.Material = Enum.Material.SmoothPlastic
-            obj.Reflectance = 0
-        end
-    end)
-end)
-
--------------------------------------------------------
--- 6) FORCE LOW RENDERING QUALITY
--------------------------------------------------------
-local function forceLowQuality()
-    pcall(function()
-        settings().Rendering.QualityLevel = Enum.SavedQualityLevel.Level01
-    end)
-end
-
--------------------------------------------------------
--- 7) MAIN LOOP
--------------------------------------------------------
-RunService.RenderStepped:Connect(function(dt)
-    enforceGraySky()
-    enforceLighting()
-    enforceTerrain()
-    forceLowQuality()
-
-    lastHeavy += dt
-    if lastHeavy >= HEAVY_LOOP_INTERVAL then
-        lastHeavy = 0
-        heavySimplify()
-    end
-end)
-
-heavySimplify()
-enforceTerrain()
-enforceLighting()
-enforceGraySky()
-forceLowQuality()
-
-print("[EXTREME VISUAL MODE + GRAY SKY + EFFECT QUALITY LV1] ACTIVE")
+print("[EXTREME MODE + HARD GRAY SKY + QUALITY LEVEL 2] ACTIVE")
