@@ -1,18 +1,16 @@
--- CLIENT-ONLY GRAY SKY + LOW TEXTURE QUALITY
--- Put in StarterPlayerScripts (LocalScript)
+-- FASTFLAG VISUAL SIMULATION SCRIPT (Client Only)
+-- Put this in StarterPlayerScripts (LocalScript)
 
 local Lighting = game:GetService("Lighting")
-local Players = game:GetService("Players")
-local player = Players.LocalPlayer
+local Terrain = workspace:FindFirstChildOfClass("Terrain")
 
--- Remove any existing sky for you only
+----------------------------------------------------------------
+-- 1. FORCE GRAY SKY (simulate Skybox disable)
+----------------------------------------------------------------
 for _, v in pairs(Lighting:GetChildren()) do
-    if v:IsA("Sky") then
-        v.Parent = nil -- removes for client only
-    end
+    if v:IsA("Sky") then v.Parent = nil end -- remove existing sky (CLIENT ONLY)
 end
 
--- Create forced gray sky
 local sky = Instance.new("Sky")
 sky.SkyboxBk = ""
 sky.SkyboxDn = ""
@@ -22,21 +20,43 @@ sky.SkyboxRt = ""
 sky.SkyboxUp = ""
 sky.Parent = Lighting
 
--- Forces environment to look gray
-Lighting.Ambient = Color3.fromRGB(150, 150, 150)
-Lighting.OutdoorAmbient = Color3.fromRGB(150, 150, 150)
-Lighting.ColorShift_Top = Color3.fromRGB(128, 128, 128)
-Lighting.ColorShift_Bottom = Color3.fromRGB(128, 128, 128)
+----------------------------------------------------------------
+-- 2. REMOVE ALL POST PROCESSING (bloom, color correction, dof)
+----------------------------------------------------------------
+for _, v in pairs(Lighting:GetChildren()) do
+    if v:IsA("PostEffect") then
+        v.Enabled = false
+    end
+end
 
--- Remove fog
-Lighting.FogEnd = 1000000
+----------------------------------------------------------------
+-- 3. REMOVE FOG
+----------------------------------------------------------------
 Lighting.FogStart = 1000000
+Lighting.FogEnd = 1000000
+Lighting.Atmosphere = nil
 
--- Force super low texture quality for client
--- Replaces textures with blank or 1x1 texture
-local function lowerTextures(obj)
+----------------------------------------------------------------
+-- 4. REMOVE SHADOWS (simulate low shadowmap quality)
+----------------------------------------------------------------
+Lighting.GlobalShadows = false
+Lighting.EnvironmentDiffuseScale = 0
+Lighting.EnvironmentSpecularScale = 0
+Lighting.ShadowSoftness = 0
+
+----------------------------------------------------------------
+-- 5. REMOVE GRASS (simulate FIntFRMGrassDistance = 0)
+----------------------------------------------------------------
+if Terrain then
+    Terrain.Decoration = false -- Removes grass and terrain detail
+end
+
+----------------------------------------------------------------
+-- 6. SIMULATE LOW TEXTURE QUALITY (skip mips)
+----------------------------------------------------------------
+local function lowerTexture(obj)
     if obj:IsA("Texture") or obj:IsA("Decal") then
-        obj.Texture = "" -- removes texture = low quality
+        obj.Texture = "" -- Removes texture completely
     end
 
     if obj:IsA("MeshPart") then
@@ -49,7 +69,45 @@ local function lowerTextures(obj)
 end
 
 for _, v in pairs(workspace:GetDescendants()) do
-    lowerTextures(v)
+    lowerTexture(v)
 end
 
-workspace.DescendantAdded:Connect(lowerTextures)
+workspace.DescendantAdded:Connect(lowerTexture)
+
+----------------------------------------------------------------
+-- 7. FLATTEN LIGHTING COLORS (simulate LOD / Voxel lighting)
+----------------------------------------------------------------
+Lighting.Brightness = 1
+Lighting.Ambient = Color3.fromRGB(150,150,150)
+Lighting.OutdoorAmbient = Color3.fromRGB(150,150,150)
+Lighting.ColorShift_Top = Color3.fromRGB(128,128,128)
+Lighting.ColorShift_Bottom = Color3.fromRGB(128,128,128)
+
+----------------------------------------------------------------
+-- 8. LOD REDUCTION (simulate CSG LOD distances = 0)
+----------------------------------------------------------------
+for _, v in pairs(workspace:GetDescendants()) do
+    if v:IsA("Model") then
+        pcall(function()
+            v.LevelOfDetail = Enum.ModelLevelOfDetail.Low
+        end)
+    end
+end
+
+----------------------------------------------------------------
+-- 9. DISABLE REFLECTIONS
+----------------------------------------------------------------
+Lighting.EnvironmentSpecularScale = 0
+Lighting.EnvironmentDiffuseScale = 0
+
+----------------------------------------------------------------
+-- 10. LOWER WATER QUALITY (simulate Voxel)
+----------------------------------------------------------------
+if Terrain then
+    Terrain.WaterWaveSize = 0
+    Terrain.WaterWaveSpeed = 0
+    Terrain.WaterTransparency = 1
+    Terrain.WaterReflectance = 0
+end
+
+print("FASTFLAG VISUAL SIMULATION APPLIED (Client Only)")
