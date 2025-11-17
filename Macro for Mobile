@@ -1,0 +1,59 @@
+-- JUMP ACTS AS MOBILE TAP ON NEAREST PLAYER
+-- Client-side, keeps animation idle, simulates perfect hit
+
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local Camera = workspace.CurrentCamera
+local LocalPlayer = Players.LocalPlayer
+
+-- Find the nearest player
+local function getNearestPlayer()
+    local nearest
+    local shortestDist = math.huge
+
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character then
+            local torso = player.Character:FindFirstChild("Torso") 
+                      or player.Character:FindFirstChild("UpperTorso") 
+                      or player.Character:FindFirstChild("HumanoidRootPart")
+            if torso then
+                local dist = (Camera.CFrame.Position - torso.Position).Magnitude
+                if dist < shortestDist then
+                    shortestDist = dist
+                    nearest = player
+                end
+            end
+        end
+    end
+
+    return nearest
+end
+
+-- Simulate mobile tap on nearest player's torso
+local function simulateTapOnPlayer(target)
+    if not target or not target.Character then return end
+
+    local torso = target.Character:FindFirstChild("Torso") 
+               or target.Character:FindFirstChild("UpperTorso") 
+               or target.Character:FindFirstChild("HumanoidRootPart")
+    if torso then
+        -- Visual indicator (like a tap hit)
+        local highlight = Instance.new("SelectionBox")
+        highlight.Adornee = torso
+        highlight.Color3 = Color3.new(1,0,0)
+        highlight.LineThickness = 0.05
+        highlight.Parent = target.Character
+        task.delay(0.2, function()
+            highlight:Destroy()
+        end)
+
+        -- For testing: prints hit as if tapped
+        print("[Jump->Tap] Detected tap on:", target.Name)
+    end
+end
+
+-- Hook jump to simulate tap
+UserInputService.JumpRequest:Connect(function()
+    local nearest = getNearestPlayer()
+    simulateTapOnPlayer(nearest)
+end)
