@@ -209,151 +209,214 @@ enforceGraySky()
 forceLowQuality()
 
 print("[EXTREME VISUAL MODE + GRAY SKY + EFFECT QUALITY LV1] ACTIVE")
-        Lighting.EnvironmentDiffuseScale = 0
-        Lighting.EnvironmentSpecularScale = 0
+-- FULL EXTREME MODE + PERMANENT GRAY SKY + LOWEST EFFECT QUALITY
+-- Works in Blox Fruits & all games
+-- Safe client-side visual override only
 
-        -- Shadows
-        Lighting.GlobalShadows = false
-        Lighting.ShadowSoftness = 0
-        -- disable shadows on any Light instances
-        for _, l in ipairs(Lighting:GetDescendants()) do
-            if l:IsA("Light") then
-                pcall(function() l.Shadows = false end)
-            end
+local RunService = game:GetService("RunService")
+local Lighting = game:GetService("Lighting")
+local Workspace = game:GetService("Workspace")
+local Terrain = Workspace:FindFirstChildOfClass("Terrain")
+
+local GRAY = Color3.fromRGB(128,128,128)
+local AMBIENT_GRAY = Color3.fromRGB(140,140,140)
+
+local lastHeavy = 0
+local HEAVY_LOOP_INTERVAL = 1.3  -- aggressive for BF effects
+
+-------------------------------------------------------
+-- 1) PERMANENT GRAY SKY
+-------------------------------------------------------
+local function enforceGraySky()
+    for _, obj in ipairs(Lighting:GetChildren()) do
+        if obj:IsA("Sky") and obj.Name ~= "_ForcedGraySky" then
+            obj:Destroy()
         end
-    end)
+    end
+
+    local sky = Lighting:FindFirstChild("_ForcedGraySky")
+    if not sky then
+        sky = Instance.new("Sky")
+        sky.Name = "_ForcedGraySky"
+        sky.Parent = Lighting
+    end
+
+    sky.SkyboxBk = ""
+    sky.SkyboxDn = ""
+    sky.SkyboxFt = ""
+    sky.SkyboxLf = ""
+    sky.SkyboxRt = ""
+    sky.SkyboxUp = ""
+    sky.SkyboxTintColor = GRAY
+    sky.CelestialBodiesShown = false
+    sky.StarCount = 0
 end
 
-----------------------------------------------------------------
--- 3) Terrain & water simplification
-----------------------------------------------------------------
+Lighting.ChildAdded:Connect(function()
+    task.defer(enforceGraySky)
+end)
+
+-------------------------------------------------------
+-- 2) REMOVE FOG / ATMOSPHERE / SHADOWS
+-------------------------------------------------------
+local function enforceLighting()
+    Lighting.FogStart = 1e9
+    Lighting.FogEnd = 1e9
+    Lighting.FogColor = GRAY
+
+    for _, obj in ipairs(Lighting:GetChildren()) do
+        if obj:IsA("Atmosphere") or obj:IsA("PostEffect") then
+            obj:Destroy()
+        end
+    end
+
+    Lighting.Brightness = 1
+    Lighting.Ambient = AMBIENT_GRAY
+    Lighting.OutdoorAmbient = AMBIENT_GRAY
+    Lighting.EnvironmentDiffuseScale = 0
+    Lighting.EnvironmentSpecularScale = 0
+
+    Lighting.ColorShift_Top = GRAY
+    Lighting.ColorShift_Bottom = GRAY
+    Lighting.GlobalShadows = false
+    Lighting.ShadowSoftness = 0
+end
+
+-------------------------------------------------------
+-- 3) TERRAIN REDUCTION
+-------------------------------------------------------
 local function enforceTerrain()
-    safe(function()
-        if Terrain then
-            -- remove grass/decorations where possible
-            pcall(function() Terrain.Decoration = false end)
-
-            -- flatten water properties
-            pcall(function()
-                Terrain.WaterWaveSize = 0
-                Terrain.WaterWaveSpeed = 0
-                Terrain.WaterTransparency = 1
-                Terrain.WaterReflectance = 0
-            end)
-        end
-    end)
+    if Terrain then
+        Terrain.Decoration = false
+        Terrain.WaterWaveSize = 0
+        Terrain.WaterWaveSpeed = 0
+        Terrain.WaterTransparency = 1
+        Terrain.WaterReflectance = 0
+    end
 end
 
-----------------------------------------------------------------
--- 4) Simplify workspace parts / textures (heavy pass)
---    This pass is costly; run less frequently
-----------------------------------------------------------------
-local function heavySimplifyDescendants()
-    safe(function()
-        for _, obj in ipairs(Workspace:GetDescendants()) do
-            -- Simplify materials & reflectance on Parts and MeshParts
-            if obj:IsA("Part") or obj:IsA("MeshPart") or obj:IsA("UnionOperation") then
-                pcall(function()
-                    obj.Material = Enum.Material.SmoothPlastic
-                    obj.Reflectance = 0
-                    -- optional: remove surface appearance if present
-                    local sa = obj:FindFirstChildOfClass("SurfaceAppearance")
-                    if sa then
-                        pcall(function() sa:Destroy() end)
-                    end
-                end)
-            end
+-------------------------------------------------------
+-- 4) EFFECT QUALITY REDUCER (Particles/Beams/Trails)
+-------------------------------------------------------
+local function simplifyEffect(obj)
+    -- PARTICLES
+    if obj:IsA("ParticleEmitter") then
+        obj.Rate = 0
+        obj.Speed = NumberRange.new(0)
+        obj.Lifetime = NumberRange.new(0)
+        obj.LightEmission = 0
+        obj.LightInfluence = 0
+        obj.Size = NumberSequence.new(0)
+        obj.Transparency = NumberSequence.new(1)
+    end
 
-            -- Hide decals & textures by making them invisible
-            if obj:IsA("Decal") or obj:IsA("Texture") then
-                pcall(function() obj.Transparency = 1 end)
-            end
+    -- BEAMS
+    if obj:IsA("Beam") then
+        obj.LightEmission = 0
+        obj.LightInfluence = 0
+        obj.Width0 = 0
+        obj.Width1 = 0
+        obj.Enabled = false
+    end
 
-            -- For SpecialMesh / MeshParts remove texture ids (safe: just set to empty string)
-            if obj:IsA("SpecialMesh") then
-                pcall(function() obj.TextureId = "" end)
-            end
-            if obj:IsA("MeshPart") then
-                pcall(function() obj.TextureID = "" end)
-            end
-        end
-    end)
+    -- TRAILS
+    if obj:IsA("Trail") then
+        obj.Enabled = false
+        obj.Lifetime = 0
+        obj.LightEmission = 0
+        obj.WidthScale = NumberSequence.new(0)
+        obj.Transparency = NumberSequence.new(1)
+    end
+
+    -- EXPLOSIONS
+    if obj:IsA("Explosion") then
+        obj.BlastPressure = 0
+        obj.BlastRadius = 0
+        obj.Visible = false
+    end
+
+    -- SMOKE / FIRE / SPARKLES
+    if obj:IsA("Smoke") or obj:IsA("Fire") or obj:IsA("Sparkles") then
+        obj.Enabled = false
+    end
 end
 
--- Also watch for new descendants and apply immediate simplification (lightweight)
+-------------------------------------------------------
+-- 5) HEAVY PASS — MESH/DECAL/TEXTURE REDUCTION
+-------------------------------------------------------
+local function heavySimplify()
+    for _, obj in ipairs(Workspace:GetDescendants()) do
+        simplifyEffect(obj)
+
+        if obj:IsA("MeshPart") then
+            obj.TextureID = ""
+        elseif obj:IsA("SpecialMesh") then
+            obj.TextureId = ""
+        end
+
+        if obj:IsA("Decal") or obj:IsA("Texture") then
+            obj.Transparency = 1
+        end
+
+        if obj:IsA("Part") or obj:IsA("MeshPart") or obj:IsA("UnionOperation") then
+            obj.Material = Enum.Material.SmoothPlastic
+            obj.Reflectance = 0
+
+            local sa = obj:FindFirstChildOfClass("SurfaceAppearance")
+            if sa then sa:Destroy() end
+        end
+    end
+end
+
 Workspace.DescendantAdded:Connect(function(obj)
     task.defer(function()
-        safe(function()
-            if obj:IsA("Part") or obj:IsA("MeshPart") or obj:IsA("UnionOperation") then
-                pcall(function()
-                    obj.Material = Enum.Material.SmoothPlastic
-                    obj.Reflectance = 0
-                end)
-            end
-            if obj:IsA("Decal") or obj:IsA("Texture") then
-                pcall(function() obj.Transparency = 1 end)
-            end
-            if obj:IsA("SpecialMesh") then
-                pcall(function() obj.TextureId = "" end)
-            end
-            if obj:IsA("MeshPart") then
-                pcall(function() obj.TextureID = "" end)
-            end
-        end)
+        simplifyEffect(obj)
+
+        if obj:IsA("Decal") or obj:IsA("Texture") then
+            obj.Transparency = 1
+        end
+        if obj:IsA("MeshPart") then
+            obj.TextureID = ""
+        end
+        if obj:IsA("SpecialMesh") then
+            obj.TextureId = ""
+        end
+        if obj:IsA("Part") or obj:IsA("MeshPart") or obj:IsA("UnionOperation") then
+            obj.Material = Enum.Material.SmoothPlastic
+            obj.Reflectance = 0
+        end
     end)
 end)
 
-----------------------------------------------------------------
--- 5) Force rendering quality lowest (client-only)
-----------------------------------------------------------------
+-------------------------------------------------------
+-- 6) FORCE LOW RENDERING QUALITY
+-------------------------------------------------------
 local function forceLowQuality()
-    safe(function()
-        -- set rendering quality to lowest (client-only)
-        pcall(function()
-            settings().Rendering.QualityLevel = Enum.SavedQualityLevel.Level01
-        end)
+    pcall(function()
+        settings().Rendering.QualityLevel = Enum.SavedQualityLevel.Level01
     end)
 end
 
-----------------------------------------------------------------
--- 6) Main enforcement loop
-----------------------------------------------------------------
-local function frameEnforce()
-    -- super-light tasks every frame
-    enforceSky()
-    enforceLightingBasics()
+-------------------------------------------------------
+-- 7) MAIN LOOP
+-------------------------------------------------------
+RunService.RenderStepped:Connect(function(dt)
+    enforceGraySky()
+    enforceLighting()
     enforceTerrain()
     forceLowQuality()
-end
 
--- Heartbeat/Render loop with heavy pass every HEAVY_LOOP_INTERVAL
-RunService.RenderStepped:Connect(function(dt)
-    if FRAME_ENFORCE then
-        frameEnforce()
-    end
-
-    lastHeavy = lastHeavy + dt
+    lastHeavy += dt
     if lastHeavy >= HEAVY_LOOP_INTERVAL then
         lastHeavy = 0
-        heavySimplifyDescendants()
+        heavySimplify()
     end
 end)
 
--- Initial heavy pass immediately
-heavySimplifyDescendants()
+heavySimplify()
+enforceTerrain()
+enforceLighting()
+enforceGraySky()
+forceLowQuality()
 
--- Extra defensive timers: re-apply a few seconds after join in case BF scripts run late
-task.delay(0.5, function()
-    heavySimplifyDescendants()
-    enforceLightingBasics()
-    enforceSky()
-    enforceTerrain()
-end)
-
-task.delay(2, function()
-    heavySimplifyDescendants()
-    enforceLightingBasics()
-    enforceSky()
-    enforceTerrain()
-end)
-
+print("[EXTREME VISUAL MODE + GRAY SKY + EFFECT QUALITY LV1] ACTIVE")
