@@ -1,113 +1,251 @@
--- FASTFLAG VISUAL SIMULATION SCRIPT (Client Only)
--- Put this in StarterPlayerScripts (LocalScript)
+-- EXTREME CLIENT-SIDE VISUAL OVERRIDE (Blox Fruits - Option C)
+-- Put this LocalScript in StarterPlayerScripts
+-- WARNING: aggressive enforcement (high-frequency). Adjust intervals if needed.
 
+local RunService = game:GetService("RunService")
 local Lighting = game:GetService("Lighting")
-local Terrain = workspace:FindFirstChildOfClass("Terrain")
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+local player = Players.LocalPlayer
+local Terrain = Workspace:FindFirstChildOfClass("Terrain")
 
-----------------------------------------------------------------
--- 1. FORCE GRAY SKY (simulate Skybox disable)
-----------------------------------------------------------------
-for _, v in pairs(Lighting:GetChildren()) do
-    if v:IsA("Sky") then v.Parent = nil end -- remove existing sky (CLIENT ONLY)
-end
+-- Configuration (tweak if needed)
+local FRAME_ENFORCE = true              -- run the lightest fixes every RenderStepped
+local HEAVY_LOOP_INTERVAL = 1.5         -- seconds between heavy re-writes (texture/descendant passes)
+local SKY_GRAY = Color3.fromRGB(128,128,128)
+local AMBIENT_GRAY = Color3.fromRGB(140,140,140)
+local TOP_BOTTOM_GRAY = Color3.fromRGB(128,128,128)
 
-local sky = Instance.new("Sky")
-sky.SkyboxBk = ""
-sky.SkyboxDn = ""
-sky.SkyboxFt = ""
-sky.SkyboxLf = ""
-sky.SkyboxRt = ""
-sky.SkyboxUp = ""
-sky.Parent = Lighting
+-- Internal state
+local lastHeavy = 0
 
-----------------------------------------------------------------
--- 2. REMOVE ALL POST PROCESSING (bloom, color correction, dof)
-----------------------------------------------------------------
-for _, v in pairs(Lighting:GetChildren()) do
-    if v:IsA("PostEffect") then
-        v.Enabled = false
+-- Utility: safe pcall wrapper
+local function safe(fn, ...)
+    local ok, err = pcall(fn, ...)
+    if not ok then
+        -- fail silently
     end
 end
 
 ----------------------------------------------------------------
--- 3. REMOVE FOG
+-- 1) Create / enforce a blank gray Sky (CLIENT ONLY)
 ----------------------------------------------------------------
-Lighting.FogStart = 1000000
-Lighting.FogEnd = 1000000
-Lighting.Atmosphere = nil
+local function enforceSky()
+    safe(function()
+        -- remove server-inserted sky instances locally
+        for _, child in ipairs(Lighting:GetChildren()) do
+            if child:IsA("Sky") then
+                child:Destroy()
+            end
+        end
+
+        local sky = Lighting:FindFirstChild("_CLIENT_GRAY_SKY")
+        if not sky then
+            sky = Instance.new("Sky")
+            sky.Name = "_CLIENT_GRAY_SKY"
+            sky.Parent = Lighting
+        end
+
+        -- Clear textures and tint gray
+        sky.SkyboxBk = ""
+        sky.SkyboxDn = ""
+        sky.SkyboxFt = ""
+        sky.SkyboxLf = ""
+        sky.SkyboxRt = ""
+        sky.SkyboxUp = ""
+        sky.SkyboxTintColor = SKY_GRAY
+        sky.CelestialBodiesShown = false
+        sky.StarCount = 0
+    end)
+end
+
+-- Also watch for direct child additions to Lighting and override immediately
+Lighting.ChildAdded:Connect(function(child)
+    -- small delay to allow other scripts to do their work, then enforce
+    task.defer(function()
+        enforceSky()
+    end)
+end)
 
 ----------------------------------------------------------------
--- 4. REMOVE SHADOWS (simulate low shadowmap quality)
+-- 2) Remove fog, atmosphere and post effects aggressively
 ----------------------------------------------------------------
-Lighting.GlobalShadows = false
-Lighting.EnvironmentDiffuseScale = 0
-Lighting.EnvironmentSpecularScale = 0
-Lighting.ShadowSoftness = 0
+local function enforceLightingBasics()
+    safe(function()
+        -- Fog
+        Lighting.FogStart = 1e9
+        Lighting.FogEnd = 1e9
+        Lighting.FogColor = SKY_GRAY
 
-----------------------------------------------------------------
--- 5. REMOVE GRASS (simulate FIntFRMGrassDistance = 0)
-----------------------------------------------------------------
-if Terrain then
-    Terrain.Decoration = false -- Removes grass and terrain detail
+        -- Atmosphere
+        local atm = Lighting:FindFirstChildOfClass("Atmosphere")
+        if atm then
+            atm:Destroy()
+        end
+
+        -- Remove / disable post effects
+        for _, obj in pairs(Lighting:GetChildren()) do
+            if obj:IsA("PostEffect") then
+                -- try to disable; if disabling isn't enough, destroy the instance locally
+                pcall(function() obj.Enabled = false end)
+                -- some games recreate; destroy client-side (doesn't affect server)
+                if obj.Name ~= "_CLIENT_GRAY_SKY" then
+                    pcall(function() obj:Destroy() end)
+                end
+            end
+        end
+
+        -- Flatten lighting
+        Lighting.Brightness = 1
+        Lighting.Ambient = AMBIENT_GRAY
+        Lighting.OutdoorAmbient = AMBIENT_GRAY
+        Lighting.ColorShift_Top = TOP_BOTTOM_GRAY
+        Lighting.ColorShift_Bottom = TOP_BOTTOM_GRAY
+        Lighting.EnvironmentDiffuseScale = 0
+        Lighting.EnvironmentSpecularScale = 0
+
+        -- Shadows
+        Lighting.GlobalShadows = false
+        Lighting.ShadowSoftness = 0
+        -- disable shadows on any Light instances
+        for _, l in ipairs(Lighting:GetDescendants()) do
+            if l:IsA("Light") then
+                pcall(function() l.Shadows = false end)
+            end
+        end
+    end)
 end
 
 ----------------------------------------------------------------
--- 6. SIMULATE LOW TEXTURE QUALITY (skip mips)
+-- 3) Terrain & water simplification
 ----------------------------------------------------------------
-local function lowerTexture(obj)
-    if obj:IsA("Texture") or obj:IsA("Decal") then
-        obj.Texture = "" -- Removes texture completely
-    end
+local function enforceTerrain()
+    safe(function()
+        if Terrain then
+            -- remove grass/decorations where possible
+            pcall(function() Terrain.Decoration = false end)
 
-    if obj:IsA("MeshPart") then
-        obj.TextureID = ""
-    end
-
-    if obj:IsA("SpecialMesh") then
-        obj.TextureId = ""
-    end
+            -- flatten water properties
+            pcall(function()
+                Terrain.WaterWaveSize = 0
+                Terrain.WaterWaveSpeed = 0
+                Terrain.WaterTransparency = 1
+                Terrain.WaterReflectance = 0
+            end)
+        end
+    end)
 end
 
-for _, v in pairs(workspace:GetDescendants()) do
-    lowerTexture(v)
+----------------------------------------------------------------
+-- 4) Simplify workspace parts / textures (heavy pass)
+--    This pass is costly; run less frequently
+----------------------------------------------------------------
+local function heavySimplifyDescendants()
+    safe(function()
+        for _, obj in ipairs(Workspace:GetDescendants()) do
+            -- Simplify materials & reflectance on Parts and MeshParts
+            if obj:IsA("Part") or obj:IsA("MeshPart") or obj:IsA("UnionOperation") then
+                pcall(function()
+                    obj.Material = Enum.Material.SmoothPlastic
+                    obj.Reflectance = 0
+                    -- optional: remove surface appearance if present
+                    local sa = obj:FindFirstChildOfClass("SurfaceAppearance")
+                    if sa then
+                        pcall(function() sa:Destroy() end)
+                    end
+                end)
+            end
+
+            -- Hide decals & textures by making them invisible
+            if obj:IsA("Decal") or obj:IsA("Texture") then
+                pcall(function() obj.Transparency = 1 end)
+            end
+
+            -- For SpecialMesh / MeshParts remove texture ids (safe: just set to empty string)
+            if obj:IsA("SpecialMesh") then
+                pcall(function() obj.TextureId = "" end)
+            end
+            if obj:IsA("MeshPart") then
+                pcall(function() obj.TextureID = "" end)
+            end
+        end
+    end)
 end
 
-workspace.DescendantAdded:Connect(lowerTexture)
-
-----------------------------------------------------------------
--- 7. FLATTEN LIGHTING COLORS (simulate LOD / Voxel lighting)
-----------------------------------------------------------------
-Lighting.Brightness = 1
-Lighting.Ambient = Color3.fromRGB(150,150,150)
-Lighting.OutdoorAmbient = Color3.fromRGB(150,150,150)
-Lighting.ColorShift_Top = Color3.fromRGB(128,128,128)
-Lighting.ColorShift_Bottom = Color3.fromRGB(128,128,128)
-
-----------------------------------------------------------------
--- 8. LOD REDUCTION (simulate CSG LOD distances = 0)
-----------------------------------------------------------------
-for _, v in pairs(workspace:GetDescendants()) do
-    if v:IsA("Model") then
-        pcall(function()
-            v.LevelOfDetail = Enum.ModelLevelOfDetail.Low
+-- Also watch for new descendants and apply immediate simplification (lightweight)
+Workspace.DescendantAdded:Connect(function(obj)
+    task.defer(function()
+        safe(function()
+            if obj:IsA("Part") or obj:IsA("MeshPart") or obj:IsA("UnionOperation") then
+                pcall(function()
+                    obj.Material = Enum.Material.SmoothPlastic
+                    obj.Reflectance = 0
+                end)
+            end
+            if obj:IsA("Decal") or obj:IsA("Texture") then
+                pcall(function() obj.Transparency = 1 end)
+            end
+            if obj:IsA("SpecialMesh") then
+                pcall(function() obj.TextureId = "" end)
+            end
+            if obj:IsA("MeshPart") then
+                pcall(function() obj.TextureID = "" end)
+            end
         end)
+    end)
+end)
+
+----------------------------------------------------------------
+-- 5) Force rendering quality lowest (client-only)
+----------------------------------------------------------------
+local function forceLowQuality()
+    safe(function()
+        -- set rendering quality to lowest (client-only)
+        pcall(function()
+            settings().Rendering.QualityLevel = Enum.SavedQualityLevel.Level01
+        end)
+    end)
+end
+
+----------------------------------------------------------------
+-- 6) Main enforcement loop
+----------------------------------------------------------------
+local function frameEnforce()
+    -- super-light tasks every frame
+    enforceSky()
+    enforceLightingBasics()
+    enforceTerrain()
+    forceLowQuality()
+end
+
+-- Heartbeat/Render loop with heavy pass every HEAVY_LOOP_INTERVAL
+RunService.RenderStepped:Connect(function(dt)
+    if FRAME_ENFORCE then
+        frameEnforce()
     end
-end
 
-----------------------------------------------------------------
--- 9. DISABLE REFLECTIONS
-----------------------------------------------------------------
-Lighting.EnvironmentSpecularScale = 0
-Lighting.EnvironmentDiffuseScale = 0
+    lastHeavy = lastHeavy + dt
+    if lastHeavy >= HEAVY_LOOP_INTERVAL then
+        lastHeavy = 0
+        heavySimplifyDescendants()
+    end
+end)
 
-----------------------------------------------------------------
--- 10. LOWER WATER QUALITY (simulate Voxel)
-----------------------------------------------------------------
-if Terrain then
-    Terrain.WaterWaveSize = 0
-    Terrain.WaterWaveSpeed = 0
-    Terrain.WaterTransparency = 1
-    Terrain.WaterReflectance = 0
-end
+-- Initial heavy pass immediately
+heavySimplifyDescendants()
 
-print("FASTFLAG VISUAL SIMULATION APPLIED (Client Only)")
+-- Extra defensive timers: re-apply a few seconds after join in case BF scripts run late
+task.delay(0.5, function()
+    heavySimplifyDescendants()
+    enforceLightingBasics()
+    enforceSky()
+    enforceTerrain()
+end)
+
+task.delay(2, function()
+    heavySimplifyDescendants()
+    enforceLightingBasics()
+    enforceSky()
+    enforceTerrain()
+end)
+
