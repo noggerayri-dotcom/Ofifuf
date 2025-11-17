@@ -1,0 +1,55 @@
+-- CLIENT-ONLY GRAY SKY + LOW TEXTURE QUALITY
+-- Put in StarterPlayerScripts (LocalScript)
+
+local Lighting = game:GetService("Lighting")
+local Players = game:GetService("Players")
+local player = Players.LocalPlayer
+
+-- Remove any existing sky for you only
+for _, v in pairs(Lighting:GetChildren()) do
+    if v:IsA("Sky") then
+        v.Parent = nil -- removes for client only
+    end
+end
+
+-- Create forced gray sky
+local sky = Instance.new("Sky")
+sky.SkyboxBk = ""
+sky.SkyboxDn = ""
+sky.SkyboxFt = ""
+sky.SkyboxLf = ""
+sky.SkyboxRt = ""
+sky.SkyboxUp = ""
+sky.Parent = Lighting
+
+-- Forces environment to look gray
+Lighting.Ambient = Color3.fromRGB(150, 150, 150)
+Lighting.OutdoorAmbient = Color3.fromRGB(150, 150, 150)
+Lighting.ColorShift_Top = Color3.fromRGB(128, 128, 128)
+Lighting.ColorShift_Bottom = Color3.fromRGB(128, 128, 128)
+
+-- Remove fog
+Lighting.FogEnd = 1000000
+Lighting.FogStart = 1000000
+
+-- Force super low texture quality for client
+-- Replaces textures with blank or 1x1 texture
+local function lowerTextures(obj)
+    if obj:IsA("Texture") or obj:IsA("Decal") then
+        obj.Texture = "" -- removes texture = low quality
+    end
+
+    if obj:IsA("MeshPart") then
+        obj.TextureID = ""
+    end
+
+    if obj:IsA("SpecialMesh") then
+        obj.TextureId = ""
+    end
+end
+
+for _, v in pairs(workspace:GetDescendants()) do
+    lowerTextures(v)
+end
+
+workspace.DescendantAdded:Connect(lowerTextures)
